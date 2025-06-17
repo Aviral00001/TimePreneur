@@ -1,4 +1,4 @@
-platform :ios, '13.0'
+platform :ios, '15.0'
 
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
@@ -37,9 +37,11 @@ target 'Runner' do
   end
 
   post_install do |installer|
-    # Minimal post_install block
     installer.pods_project.targets.each do |target|
       flutter_additional_ios_build_settings(target)
+      target.build_configurations.each do |config|
+        config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+      end
     end
   end
 end
