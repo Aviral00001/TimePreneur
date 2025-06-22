@@ -163,13 +163,40 @@ class _TasksScreenState extends State<TasksScreen> {
                     children: [
                       Checkbox(
                         value: isCompleted,
-                        onChanged: (checked) {
+                        onChanged: (checked) async {
                           FirebaseFirestore.instance
                               .collection('users')
                               .doc(FirebaseAuth.instance.currentUser!.uid)
                               .collection('tasks')
                               .doc(task.id)
                               .update({'isCompleted': checked});
+                          if (checked == true) {
+                            final now = DateTime.now();
+                            final dateKey =
+                                "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+                            final analyticsRef = FirebaseFirestore.instance
+                                .collection('users')
+                                .doc(FirebaseAuth.instance.currentUser!.uid)
+                                .collection('analytics')
+                                .doc(dateKey);
+
+                            final doc = await analyticsRef.get();
+                            if (doc.exists) {
+                              analyticsRef.update({
+                                'completedTasks': FieldValue.increment(1),
+                                'totalTasks': FieldValue.increment(0),
+                                'focusScore': FieldValue.increment(
+                                  0,
+                                ), // Placeholder logic
+                              });
+                            } else {
+                              analyticsRef.set({
+                                'completedTasks': 1,
+                                'totalTasks': 0,
+                                'focusScore': 0, // Placeholder logic
+                              });
+                            }
+                          }
                         },
                       ),
                       if (isSelectionMode)
@@ -264,13 +291,40 @@ class _TasksScreenState extends State<TasksScreen> {
                     children: [
                       Checkbox(
                         value: isCompleted,
-                        onChanged: (checked) {
+                        onChanged: (checked) async {
                           FirebaseFirestore.instance
                               .collection('users')
                               .doc(FirebaseAuth.instance.currentUser!.uid)
                               .collection('tasks')
                               .doc(task.id)
                               .update({'isCompleted': checked});
+                          if (checked == true) {
+                            final now = DateTime.now();
+                            final dateKey =
+                                "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+                            final analyticsRef = FirebaseFirestore.instance
+                                .collection('users')
+                                .doc(FirebaseAuth.instance.currentUser!.uid)
+                                .collection('analytics')
+                                .doc(dateKey);
+
+                            final doc = await analyticsRef.get();
+                            if (doc.exists) {
+                              analyticsRef.update({
+                                'completedTasks': FieldValue.increment(1),
+                                'totalTasks': FieldValue.increment(0),
+                                'focusScore': FieldValue.increment(
+                                  0,
+                                ), // Placeholder logic
+                              });
+                            } else {
+                              analyticsRef.set({
+                                'completedTasks': 1,
+                                'totalTasks': 0,
+                                'focusScore': 0, // Placeholder logic
+                              });
+                            }
+                          }
                         },
                       ),
                       if (isSelectionMode)

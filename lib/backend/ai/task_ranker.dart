@@ -33,6 +33,9 @@ class TaskRanker {
       'd MMM yyyy, h:mm a',
     ); // e.g. "22 Jun 2025, 7:05 PM"
 
+    final workStartHour = 8;
+    final workEndHour = 20;
+
     List<Map<String, dynamic>> scoredTasks =
         tasks.map((task) {
           final priority = task['priority'] ?? 1;
@@ -66,7 +69,34 @@ class TaskRanker {
           };
         }).toList();
 
+    // Sort by score descending
     scoredTasks.sort((a, b) => b['score'].compareTo(a['score']));
+
+    // Track occupied time windows to avoid overlaps
+    List<Map<String, DateTime>> scheduledWindows = [];
+
+    for (var task in scoredTasks) {
+      DateTime start = task['recommendedStartTime'];
+      DateTime end = task['recommendedEndTime'];
+      final int duration = (task['duration'] ?? 1).toInt();
+
+      // Shift time if it overlaps with existing tasks or is outside work hours
+      while (scheduledWindows.any(
+            (window) =>
+                start.isBefore(window['end']!) && end.isAfter(window['start']!),
+          ) ||
+          start.hour < workStartHour ||
+          end.hour > workEndHour) {
+        start = start.add(Duration(hours: 1));
+        end = start.add(Duration(hours: duration));
+      }
+
+      // Update the task's time window
+      task['recommendedStartTime'] = start;
+      task['recommendedEndTime'] = end;
+
+      scheduledWindows.add({'start': start, 'end': end});
+    }
 
     return scoredTasks.take(topN).toList();
   }
