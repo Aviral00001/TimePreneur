@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart';
 
 class TasksScreen extends StatefulWidget {
   TasksScreen({Key? key}) : super(key: key);
@@ -86,15 +87,15 @@ class _TasksScreenState extends State<TasksScreen> {
             final dataA = a.data() as Map<String, dynamic>;
             final dataB = b.data() as Map<String, dynamic>;
             final deadlineA =
-                DateTime.tryParse(
-                  dataA.containsKey('deadline') ? dataA['deadline'] : '',
-                ) ??
-                DateTime.now();
+                dataA['deadline'] is Timestamp
+                    ? (dataA['deadline'] as Timestamp).toDate()
+                    : DateTime.tryParse(dataA['deadline'].toString()) ??
+                        DateTime.now();
             final deadlineB =
-                DateTime.tryParse(
-                  dataB.containsKey('deadline') ? dataB['deadline'] : '',
-                ) ??
-                DateTime.now();
+                dataB['deadline'] is Timestamp
+                    ? (dataB['deadline'] as Timestamp).toDate()
+                    : DateTime.tryParse(dataB['deadline'].toString()) ??
+                        DateTime.now();
             final priorityA =
                 dataA.containsKey('priority') ? dataA['priority'] : 0;
             final priorityB =
@@ -112,15 +113,15 @@ class _TasksScreenState extends State<TasksScreen> {
             final dataA = a.data() as Map<String, dynamic>;
             final dataB = b.data() as Map<String, dynamic>;
             final deadlineA =
-                DateTime.tryParse(
-                  dataA.containsKey('deadline') ? dataA['deadline'] : '',
-                ) ??
-                DateTime.now();
+                dataA['deadline'] is Timestamp
+                    ? (dataA['deadline'] as Timestamp).toDate()
+                    : DateTime.tryParse(dataA['deadline'].toString()) ??
+                        DateTime.now();
             final deadlineB =
-                DateTime.tryParse(
-                  dataB.containsKey('deadline') ? dataB['deadline'] : '',
-                ) ??
-                DateTime.now();
+                dataB['deadline'] is Timestamp
+                    ? (dataB['deadline'] as Timestamp).toDate()
+                    : DateTime.tryParse(dataB['deadline'].toString()) ??
+                        DateTime.now();
             final priorityA =
                 dataA.containsKey('priority') ? dataA['priority'] : 0;
             final priorityB =
@@ -146,7 +147,11 @@ class _TasksScreenState extends State<TasksScreen> {
                         : 'N/A';
                 final deadline =
                     data != null && data.containsKey('deadline')
-                        ? data['deadline']
+                        ? (data['deadline'] is Timestamp
+                            ? DateFormat(
+                              'yyyy MMM d, h:mm a',
+                            ).format((data['deadline'] as Timestamp).toDate())
+                            : data['deadline'].toString())
                         : '';
                 final isCompleted =
                     data != null && data.containsKey('isCompleted')
@@ -243,7 +248,11 @@ class _TasksScreenState extends State<TasksScreen> {
                         : 'N/A';
                 final deadline =
                     data != null && data.containsKey('deadline')
-                        ? data['deadline']
+                        ? (data['deadline'] is Timestamp
+                            ? DateFormat(
+                              'yyyy MMM d, h:mm a',
+                            ).format((data['deadline'] as Timestamp).toDate())
+                            : data['deadline'].toString())
                         : '';
                 final isCompleted =
                     data != null && data.containsKey('isCompleted')
@@ -386,7 +395,12 @@ class _TasksScreenState extends State<TasksScreen> {
       text: taskData.containsKey('description') ? taskData['description'] : '',
     );
     final deadlineController = TextEditingController(
-      text: taskData.containsKey('deadline') ? taskData['deadline'] : '',
+      text:
+          taskData.containsKey('deadline')
+              ? (taskData['deadline'] is Timestamp
+                  ? (taskData['deadline'] as Timestamp).toDate().toString()
+                  : taskData['deadline'].toString())
+              : '',
     );
 
     int priorityValue =
@@ -400,12 +414,16 @@ class _TasksScreenState extends State<TasksScreen> {
             return AlertDialog(
               title: Text(task == null ? "Add New Task" : "Edit Task"),
               content: SingleChildScrollView(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewInsets.bottom,
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     TextField(
                       controller: titleController,
                       decoration: const InputDecoration(labelText: "Title"),
+                      autofocus: true,
                     ),
                     const SizedBox(height: 8),
                     TextField(
@@ -489,18 +507,47 @@ class _TasksScreenState extends State<TasksScreen> {
                         await tasksCollection.add({
                           "title": titleController.text,
                           "description": descriptionController.text,
-                          "deadline": deadlineController.text,
+                          "deadline":
+                              deadlineController.text.isNotEmpty
+                                  ? Timestamp.fromDate(
+                                    DateTime.parse(deadlineController.text),
+                                  )
+                                  : "",
                           "priority": priorityValue,
                           "isCompleted": false,
                           "timestamp": FieldValue.serverTimestamp(),
+                          "recommendedStartTime": "",
+                          "recommendedEndTime": "",
                         });
+                        // Log the task creation for adaptive scheduling
+                        try {
+                          await FirebaseFirestore.instance
+                              .collection('users')
+                              .doc(uid)
+                              .collection('adaptiveLogs')
+                              .add({
+                                'taskTitle': titleController.text,
+                                'priority': priorityValue,
+                                'timestamp': FieldValue.serverTimestamp(),
+                                'completedInMinutes':
+                                    null, // placeholder to be updated later
+                              });
+                        } catch (e) {
+                          print('Failed to log to adaptiveLogs: $e');
+                        }
                       } else {
                         await tasksCollection.doc(task.id).update({
                           "title": titleController.text,
                           "description": descriptionController.text,
-                          "deadline": deadlineController.text,
+                          "deadline":
+                              deadlineController.text.isNotEmpty
+                                  ? Timestamp.fromDate(
+                                    DateTime.parse(deadlineController.text),
+                                  )
+                                  : "",
                           "priority": priorityValue,
                         });
+                        // Optionally, you could update the adaptive log if you want to track updates
                       }
                       Navigator.of(context).pop(); // Close dialog
                     } else {

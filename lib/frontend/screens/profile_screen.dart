@@ -1,8 +1,5 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:timepreneur/backend/auth_controller.dart';
 import 'login_screen.dart';
 
@@ -17,80 +14,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final User? user = FirebaseAuth.instance.currentUser;
   final TextEditingController _displayNameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  String? profileImageUrl;
-  bool isUploading = false;
 
   @override
   void initState() {
     super.initState();
     _displayNameController.text = user?.displayName ?? '';
-    _loadProfileImage();
-  }
-
-  Future<void> _loadProfileImage() async {
-    try {
-      final ref = FirebaseStorage.instance.ref().child(
-        'profile_images/${user!.uid}.jpg',
-      );
-
-      // Try downloading; this alone will throw if the object doesn't exist
-      final url = await ref.getDownloadURL();
-      setState(() {
-        profileImageUrl = url;
-      });
-    } on FirebaseException catch (e) {
-      if (e.code == 'object-not-found') {
-        // This means no image was uploaded yet — silently ignore
-        debugPrint('No profile image found for user.');
-      } else {
-        debugPrint('Firebase error while loading profile image: ${e.message}');
-      }
-    } catch (e) {
-      debugPrint('Unexpected error: $e');
-    }
-  }
-
-  Future<void> _uploadProfilePicture() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-
-    if (pickedFile != null) {
-      // Validate file type
-      final path = pickedFile.path.toLowerCase();
-      if (!(path.endsWith('.jpg') ||
-          path.endsWith('.jpeg') ||
-          path.endsWith('.png'))) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Only JPG or PNG files are allowed.')),
-        );
-        return;
-      }
-
-      try {
-        setState(() => isUploading = true);
-
-        final ref = FirebaseStorage.instance.ref().child(
-          'profile_images/${user!.uid}.jpg',
-        );
-
-        final metadata = SettableMetadata(contentType: 'image/jpeg');
-
-        await ref.putFile(File(pickedFile.path), metadata);
-        final url = await ref.getDownloadURL();
-
-        if (!mounted) return;
-        setState(() {
-          profileImageUrl = url;
-          isUploading = false;
-        });
-      } catch (e) {
-        if (!mounted) return;
-        setState(() => isUploading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Upload failed: ${e.toString()}")),
-        );
-      }
-    }
   }
 
   Future<void> _updateDisplayName() async {
@@ -138,24 +66,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            if (profileImageUrl != null)
-              CircleAvatar(
-                radius: 50,
-                backgroundImage: NetworkImage(profileImageUrl!),
-              )
-            else
-              const CircleAvatar(
-                radius: 50,
-                child: Icon(Icons.person, size: 40),
-              ),
-            TextButton(
-              onPressed: isUploading ? null : _uploadProfilePicture,
-              child:
-                  isUploading
-                      ? const CircularProgressIndicator()
-                      : const Text("Upload Profile Picture"),
-            ),
-            const SizedBox(height: 20),
             Text(
               "Email: ${user?.email ?? 'N/A'}",
               style: const TextStyle(fontSize: 16),

@@ -1,3 +1,5 @@
+import 'package:intl/intl.dart';
+
 class TaskRanker {
   /// Calculates a score for each task based on priority and deadline proximity.
   /// Lower deadline (i.e., sooner) and higher priority increases the score.
@@ -17,18 +19,39 @@ class TaskRanker {
     return urgencyFactor * priorityFactor;
   }
 
-  /// Returns a list of top task suggestions sorted by highest score
+  /// Returns a list of top task suggestions sorted by highest score.
+  /// Each task includes a recommended time window based on its priority.
   List<Map<String, dynamic>> getTopSuggestions(
     List<Map<String, dynamic>> tasks, {
     int topN = 5,
   }) {
+    final formatter = DateFormat.jm(); // e.g. "5:08 PM"
+
     List<Map<String, dynamic>> scoredTasks =
         tasks.map((task) {
+          final priority = task['priority'] ?? 1;
+          final deadline =
+              task['deadline'] ?? DateTime.now().add(Duration(days: 1));
           final score = calculateTaskScore(
-            priority: task['priority'] ?? 1,
-            deadline: task['deadline'] ?? DateTime.now().add(Duration(days: 1)),
+            priority: priority,
+            deadline: deadline,
           );
-          return {...task, 'score': score};
+
+          // Calculate recommended time range based on priority
+          final int hoursBefore = (6 - priority).clamp(1, 5).toInt();
+          final recommendedStartTime = deadline.subtract(
+            Duration(hours: hoursBefore),
+          );
+          final recommendedEndTime = recommendedStartTime.add(
+            const Duration(hours: 1),
+          );
+
+          return {
+            ...task,
+            'score': score,
+            'recommendedStartTime': formatter.format(recommendedStartTime),
+            'recommendedEndTime': formatter.format(recommendedEndTime),
+          };
         }).toList();
 
     scoredTasks.sort((a, b) => b['score'].compareTo(a['score']));
