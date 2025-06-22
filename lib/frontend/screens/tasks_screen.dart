@@ -402,6 +402,12 @@ class _TasksScreenState extends State<TasksScreen> {
                   : taskData['deadline'].toString())
               : '',
     );
+    final durationController = TextEditingController(
+      text:
+          taskData.containsKey('duration')
+              ? taskData['duration'].toString()
+              : '',
+    );
 
     int priorityValue =
         taskData.containsKey('priority') ? taskData['priority'] : 3;
@@ -485,6 +491,31 @@ class _TasksScreenState extends State<TasksScreen> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 8),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Duration: ${durationController.text.isEmpty ? '1.0' : durationController.text} hrs",
+                        ),
+                        Slider(
+                          value:
+                              double.tryParse(durationController.text) ?? 1.0,
+                          min: 0.5,
+                          max: 12.0,
+                          divisions: 23,
+                          label:
+                              "${double.tryParse(durationController.text) ?? 1.0} hrs",
+                          onChanged: (value) {
+                            setStateDialog(() {
+                              durationController.text = value.toStringAsFixed(
+                                1,
+                              );
+                            });
+                          },
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -514,6 +545,8 @@ class _TasksScreenState extends State<TasksScreen> {
                                   )
                                   : "",
                           "priority": priorityValue,
+                          "duration":
+                              double.tryParse(durationController.text) ?? 1.0,
                           "isCompleted": false,
                           "timestamp": FieldValue.serverTimestamp(),
                           "recommendedStartTime": "",
@@ -546,6 +579,8 @@ class _TasksScreenState extends State<TasksScreen> {
                                   )
                                   : "",
                           "priority": priorityValue,
+                          "duration":
+                              double.tryParse(durationController.text) ?? 1.0,
                         });
                         // Optionally, you could update the adaptive log if you want to track updates
                       }
