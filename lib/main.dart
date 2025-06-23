@@ -5,9 +5,11 @@ import 'frontend/screens/home_screen.dart';
 import 'frontend/screens/login_screen.dart';
 import 'frontend/screens/setup_profile_screen.dart';
 import 'firebase_options.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(); // ⬅️ Load .env file
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   runApp(const MyApp());
 }

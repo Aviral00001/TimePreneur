@@ -4,6 +4,7 @@ import 'package:timepreneur/frontend/screens/profile_screen.dart';
 import 'package:timepreneur/backend/ai/task_ranker.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:timepreneur/frontend/screens/smart_suggestion_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -19,7 +20,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (value is Timestamp) return value.toDate();
     if (value is DateTime) return value;
     if (value is String) {
-      // Normalize Firestore string "2025-06-18 16:15:00.000" to ISO8601
       final iso = value.contains(' ') ? value.replaceFirst(' ', 'T') : value;
       return DateTime.tryParse(iso);
     }
@@ -43,30 +43,6 @@ class _HomeScreenState extends State<HomeScreen> {
           context,
           AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>> snapshot,
         ) {
-          final localFormat = (DateTime dt) {
-            String monthName(int month) {
-              const List<String> months = [
-                "Jan",
-                "Feb",
-                "Mar",
-                "Apr",
-                "May",
-                "Jun",
-                "Jul",
-                "Aug",
-                "Sep",
-                "Oct",
-                "Nov",
-                "Dec",
-              ];
-              return months[month - 1];
-            }
-
-            final month = monthName(dt.month);
-            final time = TimeOfDay.fromDateTime(dt).format(context);
-            return "${dt.day} $month ${dt.year}, $time";
-          };
-
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -110,10 +86,8 @@ class _HomeScreenState extends State<HomeScreen> {
           for (var task in rankedTasks) {
             if (task.containsKey('docId')) {
               try {
-                final start = this.parseToDateTime(
-                  task['recommendedStartTime'],
-                );
-                final end = this.parseToDateTime(task['recommendedEndTime']);
+                final start = parseToDateTime(task['recommendedStartTime']);
+                final end = parseToDateTime(task['recommendedEndTime']);
 
                 if (start != null && end != null) {
                   FirebaseFirestore.instance
@@ -132,7 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
             }
           }
 
-          return Padding(
+          return SingleChildScrollView(
             padding: const EdgeInsets.all(16.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -147,11 +121,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 ...rankedTasks.take(3).map((task) {
-                  final deadline = this.parseToDateTime(task['deadline']);
-                  final recommendedStart = this.parseToDateTime(
+                  final deadline = parseToDateTime(task['deadline']);
+                  final recommendedStart = parseToDateTime(
                     task['recommendedStartTime'],
                   );
-                  final recommendedEnd = this.parseToDateTime(
+                  final recommendedEnd = parseToDateTime(
                     task['recommendedEndTime'],
                   );
 
@@ -159,8 +133,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     title: Text(task['title']),
                     subtitle: Text(
                       'Priority: ${task['priority']} | '
-                      'Deadline: ${deadline != null ? this._formatDateTime(deadline) : "N/A"} | '
-                      'Recommended: ${recommendedStart != null && recommendedEnd != null ? "${this._formatDateTime(recommendedStart)} - ${this._formatDateTime(recommendedEnd)}" : ""}',
+                      'Deadline: ${deadline != null ? _formatDateTime(deadline) : "N/A"} | '
+                      'Recommended: ${recommendedStart != null && recommendedEnd != null ? "${_formatDateTime(recommendedStart)} - ${_formatDateTime(recommendedEnd)}" : ""}',
                     ),
                   );
                 }),
@@ -169,8 +143,9 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         },
       ),
-      TasksScreen(), // Tasks page
-      ProfileScreen(), // Profile page
+      TasksScreen(),
+      ProfileScreen(),
+      SmartSuggestionsScreen(), // ✅ New AI tab
     ];
   }
 
@@ -181,7 +156,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   String _monthName(int month) {
-    const List<String> months = [
+    const months = [
       "Jan",
       "Feb",
       "Mar",
@@ -208,15 +183,20 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("TimePreneur")),
-      body: _pages[_selectedIndex],
+      body: IndexedStack(index: _selectedIndex, children: _pages),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         selectedItemColor: Colors.deepPurple,
         onTap: _onItemTapped,
+        type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
           BottomNavigationBarItem(icon: Icon(Icons.task), label: 'Tasks'),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.lightbulb_outline),
+            label: 'AI',
+          ),
         ],
       ),
     );

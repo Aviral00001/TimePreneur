@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:timepreneur/backend/auth_controller.dart';
-import 'package:timepreneur/frontend/screens/productivity_analytics_screen.dart';
 import 'login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -91,20 +90,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: const Text("Change Password"),
             ),
             const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder:
-                        (context) => ProductivityAnalyticsScreen(
-                          userId: FirebaseAuth.instance.currentUser?.uid ?? '',
-                        ),
-                  ),
-                );
-              },
-              child: const Text("View Productivity Analytics"),
-            ),
           ],
         ),
       ),
