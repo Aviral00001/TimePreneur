@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:timepreneur/backend/ai/gpt_service.dart'; // ✅ Adjust path if needed
+import 'package:timepreneur/backend/ai/gpt_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SmartSuggestionsScreen extends StatefulWidget {
   @override
@@ -10,16 +11,50 @@ class SmartSuggestionsScreen extends StatefulWidget {
 
 class _SmartSuggestionsScreenState extends State<SmartSuggestionsScreen> {
   String? aiResponse;
+  String? _cachedResponse;
   bool isLoading = false;
+  final ScrollController _scrollController = ScrollController();
+  bool _disposed = false;
+  DateTime? _lastRetryTime;
 
   @override
   void initState() {
     super.initState();
-    _fetchAndAskGPT();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadFromCache();
+    });
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadFromCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    final cached = prefs.getString('ai_response_cache');
+    if (cached != null && !_disposed) {
+      setState(() {
+        aiResponse = cached;
+        _cachedResponse = cached;
+        isLoading = false;
+      });
+    } else {
+      _fetchAndAskGPT();
+    }
   }
 
   Future<void> _fetchAndAskGPT() async {
-    setState(() => isLoading = true);
+    if (_disposed) return;
+
+    setState(() {
+      isLoading = true;
+      aiResponse = null;
+    });
+
+    List<Map<String, dynamic>> tasks = [];
 
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
@@ -31,8 +66,8 @@ class _SmartSuggestionsScreenState extends State<SmartSuggestionsScreen> {
               .where('isCompleted', isEqualTo: false)
               .get();
 
-      final tasks =
-          snapshot.docs.map((doc) {
+      tasks =
+          snapshot.docs.take(8).map((doc) {
             final data = doc.data();
             return {
               "title": data['title'] ?? '',
@@ -42,14 +77,58 @@ class _SmartSuggestionsScreenState extends State<SmartSuggestionsScreen> {
                   data['deadline']?.toDate().toIso8601String() ?? 'unspecified',
             };
           }).toList();
-
-      final result = await GPTService.getSmartSuggestions(tasks);
-      setState(() => aiResponse = result);
     } catch (e) {
-      setState(() => aiResponse = "❌ Failed to fetch suggestions.\n$e");
+      if (_disposed) return;
+      setState(() {
+        aiResponse = "❌ Failed to fetch tasks from Firebase.\n$e";
+        isLoading = false;
+      });
+      return;
     }
 
-    setState(() => isLoading = false);
+    try {
+      final result = await GPTService.getSmartSuggestions(
+        tasks,
+      ).timeout(const Duration(seconds: 12));
+      if (_disposed) return;
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('ai_response_cache', result);
+
+      _cachedResponse = result;
+      setState(() => aiResponse = result);
+    } catch (e) {
+      if (_disposed) return;
+      setState(() => aiResponse = "❌ Failed to fetch suggestions.\n$e");
+    } finally {
+      if (_disposed) return;
+      setState(() => isLoading = false);
+    }
+  }
+
+  void _retry() {
+    final now = DateTime.now();
+    if (_lastRetryTime == null ||
+        now.difference(_lastRetryTime!) > Duration(seconds: 5)) {
+      _lastRetryTime = now;
+      _fetchAndAskGPT();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("⏳ Please wait before retrying...")),
+      );
+    }
+  }
+
+  Future<void> _clearCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('ai_response_cache');
+    setState(() {
+      _cachedResponse = null;
+      aiResponse = null;
+    });
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text("🧹 Cache cleared.")));
   }
 
   @override
@@ -62,17 +141,55 @@ class _SmartSuggestionsScreenState extends State<SmartSuggestionsScreen> {
             isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : aiResponse != null
-                ? Scrollbar(
-                  thumbVisibility: true,
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Text(
-                      aiResponse!,
-                      style: const TextStyle(fontSize: 16),
+                ? Column(
+                  children: [
+                    Expanded(
+                      child: Scrollbar(
+                        thumbVisibility: true,
+                        controller: _scrollController,
+                        child: SingleChildScrollView(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.all(8.0),
+                          child: Text(
+                            aiResponse!,
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: _fetchAndAskGPT,
+                          icon: Icon(Icons.refresh),
+                          label: Text("Refresh Suggestions"),
+                        ),
+                        ElevatedButton.icon(
+                          onPressed: _clearCache,
+                          icon: Icon(Icons.delete_forever),
+                          label: Text("Clear Cache"),
+                        ),
+                      ],
+                    ),
+                  ],
                 )
-                : const Center(child: Text("No suggestions available.")),
+                : Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text("No suggestions available."),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: _retry,
+                      child: const Text("Retry"),
+                    ),
+                    ElevatedButton(
+                      onPressed: _clearCache,
+                      child: const Text("Clear Cache"),
+                    ),
+                  ],
+                ),
       ),
     );
   }

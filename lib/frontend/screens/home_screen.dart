@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:timepreneur/frontend/screens/tasks_screen.dart';
 import 'package:timepreneur/frontend/screens/profile_screen.dart';
 import 'package:timepreneur/backend/ai/task_ranker.dart';
+import 'package:timepreneur/backend/services/goal_service.dart'; // ← New import
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:timepreneur/frontend/screens/smart_suggestion_screen.dart';
+import 'package:timepreneur/frontend/screens/goal_card.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -15,6 +18,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
+  bool _hasSeededGoal = false; // ← New flag
 
   DateTime? parseToDateTime(dynamic value) {
     if (value is Timestamp) return value.toDate();
@@ -31,6 +35,9 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _ensureDefaultGoal();
+    });
     _pages = <Widget>[
       StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream:
@@ -46,11 +53,11 @@ class _HomeScreenState extends State<HomeScreen> {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return const Center(child: Text("No tasks available"));
           }
 
+          // build & rank tasks...
           List<Map<String, dynamic>> tasks =
               snapshot.data!.docs
                   .map((doc) {
@@ -83,12 +90,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
           final rankedTasks = TaskRanker().getTopSuggestions(tasks);
 
+          // write back recommendations...
           for (var task in rankedTasks) {
             if (task.containsKey('docId')) {
               try {
                 final start = parseToDateTime(task['recommendedStartTime']);
                 final end = parseToDateTime(task['recommendedEndTime']);
-
                 if (start != null && end != null) {
                   FirebaseFirestore.instance
                       .collection('users')
@@ -111,6 +118,8 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                GoalCard(), // ← Show goal card
+                const SizedBox(height: 12),
                 const Text(
                   'Welcome to TimePreneur!',
                   style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
@@ -122,19 +131,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 ...rankedTasks.take(3).map((task) {
                   final deadline = parseToDateTime(task['deadline']);
-                  final recommendedStart = parseToDateTime(
+                  final recStart = parseToDateTime(
                     task['recommendedStartTime'],
                   );
-                  final recommendedEnd = parseToDateTime(
-                    task['recommendedEndTime'],
-                  );
-
+                  final recEnd = parseToDateTime(task['recommendedEndTime']);
                   return ListTile(
                     title: Text(task['title']),
                     subtitle: Text(
                       'Priority: ${task['priority']} | '
                       'Deadline: ${deadline != null ? _formatDateTime(deadline) : "N/A"} | '
-                      'Recommended: ${recommendedStart != null && recommendedEnd != null ? "${_formatDateTime(recommendedStart)} - ${_formatDateTime(recommendedEnd)}" : ""}',
+                      'Recommended: ${recStart != null && recEnd != null ? "${_formatDateTime(recStart)} - ${_formatDateTime(recEnd)}" : ""}',
                     ),
                   );
                 }),
@@ -145,17 +151,52 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       TasksScreen(),
       ProfileScreen(),
-      SmartSuggestionsScreen(), // ✅ New AI tab
+      SmartSuggestionsScreen(),
     ];
   }
 
-  void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
+  /// Seeds a default weekly goal if none exists
+  Future<void> _ensureDefaultGoal() async {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    debugPrint('🔸 ensureDefaultGoal() called for uid=$uid');
+    final goalsRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('goals');
+
+    final snapshot = await goalsRef.limit(1).get();
+    debugPrint('🔸 existing goals count: ${snapshot.docs.length}');
+    if (snapshot.docs.isEmpty && !_hasSeededGoal) {
+      _hasSeededGoal = true;
+      final now = DateTime.now();
+      // Monday of this week:
+      final startOfWeek = DateTime(
+        now.year,
+        now.month,
+        now.day,
+      ).subtract(Duration(days: now.weekday - 1));
+      // Sunday 23:59:
+      final endOfWeek = startOfWeek.add(
+        const Duration(days: 6, hours: 23, minutes: 59),
+      );
+
+      debugPrint('🔸 creating default goal from $startOfWeek → $endOfWeek');
+      await GoalService.createGoal(
+        title: 'Complete 5 tasks',
+        target: 5,
+        startDate: startOfWeek,
+        endDate: endOfWeek,
+      );
+      debugPrint('✅ default goal created');
+      setState(() {}); // refresh GoalCard stream subscription
+    }
   }
 
-  String _monthName(int month) {
+  void _onItemTapped(int index) {
+    setState(() => _selectedIndex = index);
+  }
+
+  String _monthName(int m) {
     const months = [
       "Jan",
       "Feb",
@@ -170,7 +211,7 @@ class _HomeScreenState extends State<HomeScreen> {
       "Nov",
       "Dec",
     ];
-    return months[month - 1];
+    return months[m - 1];
   }
 
   String _formatDateTime(DateTime dt) {
@@ -180,25 +221,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text("TimePreneur")),
-      body: IndexedStack(index: _selectedIndex, children: _pages),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        selectedItemColor: Colors.deepPurple,
-        onTap: _onItemTapped,
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.task), label: 'Tasks'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.lightbulb_outline),
-            label: 'AI',
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text("TimePreneur")),
+    body: IndexedStack(index: _selectedIndex, children: _pages),
+    bottomNavigationBar: BottomNavigationBar(
+      currentIndex: _selectedIndex,
+      selectedItemColor: Colors.deepPurple,
+      onTap: _onItemTapped,
+      type: BottomNavigationBarType.fixed,
+      items: const [
+        BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+        BottomNavigationBarItem(icon: Icon(Icons.task), label: 'Tasks'),
+        BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.lightbulb_outline),
+          label: 'AI',
+        ),
+      ],
+    ),
+  );
 }

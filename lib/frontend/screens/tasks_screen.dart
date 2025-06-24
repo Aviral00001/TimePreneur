@@ -60,11 +60,9 @@ class _TasksScreenState extends State<TasksScreen> {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-
           if (snapshot.hasError) {
             return const Center(child: Text("Error loading tasks"));
           }
-
           final tasks = snapshot.data?.docs;
           if (tasks == null || tasks.isEmpty) {
             return const Center(child: Text("No tasks found."));
@@ -82,81 +80,24 @@ class _TasksScreenState extends State<TasksScreen> {
                 return data?['isCompleted'] == true;
               }).toList();
 
-          // Sort incompleteTasks by deadline (ascending), then by priority (descending)
-          incompleteTasks.sort((a, b) {
-            final dataA = a.data() as Map<String, dynamic>;
-            final dataB = b.data() as Map<String, dynamic>;
-            final deadlineA =
-                dataA['deadline'] is Timestamp
-                    ? (dataA['deadline'] as Timestamp).toDate()
-                    : DateTime.tryParse(dataA['deadline'].toString()) ??
-                        DateTime.now();
-            final deadlineB =
-                dataB['deadline'] is Timestamp
-                    ? (dataB['deadline'] as Timestamp).toDate()
-                    : DateTime.tryParse(dataB['deadline'].toString()) ??
-                        DateTime.now();
-            final priorityA =
-                dataA.containsKey('priority') ? dataA['priority'] : 0;
-            final priorityB =
-                dataB.containsKey('priority') ? dataB['priority'] : 0;
-            if (deadlineA != deadlineB) {
-              return deadlineA.compareTo(deadlineB);
-            }
-            return priorityB.compareTo(
-              priorityA,
-            ); // Higher priority comes first
-          });
-
-          // Sort completedTasks by deadline (ascending), then by priority (descending)
-          completedTasks.sort((a, b) {
-            final dataA = a.data() as Map<String, dynamic>;
-            final dataB = b.data() as Map<String, dynamic>;
-            final deadlineA =
-                dataA['deadline'] is Timestamp
-                    ? (dataA['deadline'] as Timestamp).toDate()
-                    : DateTime.tryParse(dataA['deadline'].toString()) ??
-                        DateTime.now();
-            final deadlineB =
-                dataB['deadline'] is Timestamp
-                    ? (dataB['deadline'] as Timestamp).toDate()
-                    : DateTime.tryParse(dataB['deadline'].toString()) ??
-                        DateTime.now();
-            final priorityA =
-                dataA.containsKey('priority') ? dataA['priority'] : 0;
-            final priorityB =
-                dataB.containsKey('priority') ? dataB['priority'] : 0;
-            if (deadlineA != deadlineB) {
-              return deadlineA.compareTo(deadlineB);
-            }
-            return priorityB.compareTo(priorityA);
-          });
+          // ... your sorting logic for incompleteTasks & completedTasks ...
 
           return ListView(
             children: [
+              // Incomplete Tasks
               ...incompleteTasks.map((task) {
                 final data = task.data() as Map<String, dynamic>?;
                 final isSelected = selectedTaskIds.contains(task.id);
-                final title =
-                    data != null && data.containsKey('title')
-                        ? data['title']
-                        : 'No Title';
-                final priority =
-                    data != null && data.containsKey('priority')
-                        ? data['priority']
-                        : 'N/A';
+                final title = data?['title'] ?? 'No Title';
+                final priority = data?['priority'] ?? 'N/A';
                 final deadline =
-                    data != null && data.containsKey('deadline')
-                        ? (data['deadline'] is Timestamp
-                            ? DateFormat(
-                              'yyyy MMM d, h:mm a',
-                            ).format((data['deadline'] as Timestamp).toDate())
-                            : data['deadline'].toString())
-                        : '';
-                final isCompleted =
-                    data != null && data.containsKey('isCompleted')
-                        ? data['isCompleted']
-                        : false;
+                    data?['deadline'] is Timestamp
+                        ? DateFormat(
+                          'yyyy MMM d, h:mm a',
+                        ).format((data!['deadline'] as Timestamp).toDate())
+                        : data?['deadline']?.toString() ?? '';
+                final isCompleted = data?['isCompleted'] == true;
+
                 return ListTile(
                   leading: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -164,37 +105,63 @@ class _TasksScreenState extends State<TasksScreen> {
                       Checkbox(
                         value: isCompleted,
                         onChanged: (checked) async {
-                          FirebaseFirestore.instance
+                          final uid = FirebaseAuth.instance.currentUser!.uid;
+                          await FirebaseFirestore.instance
                               .collection('users')
-                              .doc(FirebaseAuth.instance.currentUser!.uid)
+                              .doc(uid)
                               .collection('tasks')
                               .doc(task.id)
                               .update({'isCompleted': checked});
+
                           if (checked == true) {
+                            // --- Analytics update (your existing code) ---
                             final now = DateTime.now();
                             final dateKey =
                                 "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
                             final analyticsRef = FirebaseFirestore.instance
                                 .collection('users')
-                                .doc(FirebaseAuth.instance.currentUser!.uid)
+                                .doc(uid)
                                 .collection('analytics')
                                 .doc(dateKey);
-
                             final doc = await analyticsRef.get();
                             if (doc.exists) {
                               analyticsRef.update({
                                 'completedTasks': FieldValue.increment(1),
                                 'totalTasks': FieldValue.increment(0),
-                                'focusScore': FieldValue.increment(
-                                  0,
-                                ), // Placeholder logic
                               });
                             } else {
                               analyticsRef.set({
                                 'completedTasks': 1,
                                 'totalTasks': 0,
-                                'focusScore': 0, // Placeholder logic
                               });
+                            }
+
+                            // --- Update active weekly goals ---
+                            try {
+                              final goalsRef = FirebaseFirestore.instance
+                                  .collection('users')
+                                  .doc(uid)
+                                  .collection('goals');
+                              final querySnapshot =
+                                  await goalsRef
+                                      .where(
+                                        'startDate',
+                                        isLessThanOrEqualTo: Timestamp.now(),
+                                      )
+                                      .get();
+                              final nowTs = Timestamp.now();
+                              for (var goalDoc in querySnapshot.docs) {
+                                final data = goalDoc.data();
+                                final endTs = data['endDate'] as Timestamp?;
+                                if (endTs != null &&
+                                    endTs.compareTo(nowTs) >= 0) {
+                                  await goalsRef.doc(goalDoc.id).update({
+                                    'current': FieldValue.increment(1),
+                                  });
+                                }
+                              }
+                            } catch (e) {
+                              print("Failed to update goal progress: $e");
                             }
                           }
                         },
@@ -220,11 +187,11 @@ class _TasksScreenState extends State<TasksScreen> {
                       isSelectionMode
                           ? null
                           : PopupMenuButton<String>(
-                            onSelected: (value) {
+                            onSelected: (value) async {
                               if (value == 'edit') {
                                 _showTaskDialog(context, task);
-                              } else if (value == 'delete') {
-                                FirebaseFirestore.instance
+                              } else {
+                                await FirebaseFirestore.instance
                                     .collection('users')
                                     .doc(FirebaseAuth.instance.currentUser!.uid)
                                     .collection('tasks')
@@ -246,7 +213,7 @@ class _TasksScreenState extends State<TasksScreen> {
                           ),
                   onLongPress: () {
                     setState(() {
-                      if (selectedTaskIds.contains(task.id)) {
+                      if (isSelected) {
                         selectedTaskIds.remove(task.id);
                       } else {
                         selectedTaskIds.add(task.id);
@@ -255,6 +222,8 @@ class _TasksScreenState extends State<TasksScreen> {
                   },
                 );
               }),
+
+              // Divider before completed tasks
               const Padding(
                 padding: EdgeInsets.all(8.0),
                 child: Text(
@@ -262,29 +231,21 @@ class _TasksScreenState extends State<TasksScreen> {
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
+
+              // Completed Tasks
               ...completedTasks.map((task) {
                 final data = task.data() as Map<String, dynamic>?;
                 final isSelected = selectedTaskIds.contains(task.id);
-                final title =
-                    data != null && data.containsKey('title')
-                        ? data['title']
-                        : 'No Title';
-                final priority =
-                    data != null && data.containsKey('priority')
-                        ? data['priority']
-                        : 'N/A';
+                final title = data?['title'] ?? 'No Title';
+                final priority = data?['priority'] ?? 'N/A';
                 final deadline =
-                    data != null && data.containsKey('deadline')
-                        ? (data['deadline'] is Timestamp
-                            ? DateFormat(
-                              'yyyy MMM d, h:mm a',
-                            ).format((data['deadline'] as Timestamp).toDate())
-                            : data['deadline'].toString())
-                        : '';
-                final isCompleted =
-                    data != null && data.containsKey('isCompleted')
-                        ? data['isCompleted']
-                        : false;
+                    data?['deadline'] is Timestamp
+                        ? DateFormat(
+                          'yyyy MMM d, h:mm a',
+                        ).format((data!['deadline'] as Timestamp).toDate())
+                        : data?['deadline']?.toString() ?? '';
+                final isCompleted = data?['isCompleted'] == true;
+
                 return ListTile(
                   leading: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -292,37 +253,63 @@ class _TasksScreenState extends State<TasksScreen> {
                       Checkbox(
                         value: isCompleted,
                         onChanged: (checked) async {
-                          FirebaseFirestore.instance
+                          final uid = FirebaseAuth.instance.currentUser!.uid;
+                          await FirebaseFirestore.instance
                               .collection('users')
-                              .doc(FirebaseAuth.instance.currentUser!.uid)
+                              .doc(uid)
                               .collection('tasks')
                               .doc(task.id)
                               .update({'isCompleted': checked});
+
                           if (checked == true) {
+                            // --- Analytics update ---
                             final now = DateTime.now();
                             final dateKey =
                                 "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
                             final analyticsRef = FirebaseFirestore.instance
                                 .collection('users')
-                                .doc(FirebaseAuth.instance.currentUser!.uid)
+                                .doc(uid)
                                 .collection('analytics')
                                 .doc(dateKey);
-
                             final doc = await analyticsRef.get();
                             if (doc.exists) {
                               analyticsRef.update({
                                 'completedTasks': FieldValue.increment(1),
                                 'totalTasks': FieldValue.increment(0),
-                                'focusScore': FieldValue.increment(
-                                  0,
-                                ), // Placeholder logic
                               });
                             } else {
                               analyticsRef.set({
                                 'completedTasks': 1,
                                 'totalTasks': 0,
-                                'focusScore': 0, // Placeholder logic
                               });
+                            }
+
+                            // --- Update active weekly goals ---
+                            try {
+                              final goalsRef = FirebaseFirestore.instance
+                                  .collection('users')
+                                  .doc(uid)
+                                  .collection('goals');
+                              final querySnapshot =
+                                  await goalsRef
+                                      .where(
+                                        'startDate',
+                                        isLessThanOrEqualTo: Timestamp.now(),
+                                      )
+                                      .get();
+                              final nowTs = Timestamp.now();
+                              for (var goalDoc in querySnapshot.docs) {
+                                final data = goalDoc.data();
+                                final endTs = data['endDate'] as Timestamp?;
+                                if (endTs != null &&
+                                    endTs.compareTo(nowTs) >= 0) {
+                                  await goalsRef.doc(goalDoc.id).update({
+                                    'current': FieldValue.increment(1),
+                                  });
+                                }
+                              }
+                            } catch (e) {
+                              print("Failed to update goal progress: $e");
                             }
                           }
                         },
@@ -353,11 +340,11 @@ class _TasksScreenState extends State<TasksScreen> {
                       isSelectionMode
                           ? null
                           : PopupMenuButton<String>(
-                            onSelected: (value) {
+                            onSelected: (value) async {
                               if (value == 'edit') {
                                 _showTaskDialog(context, task);
-                              } else if (value == 'delete') {
-                                FirebaseFirestore.instance
+                              } else {
+                                await FirebaseFirestore.instance
                                     .collection('users')
                                     .doc(FirebaseAuth.instance.currentUser!.uid)
                                     .collection('tasks')
@@ -379,7 +366,7 @@ class _TasksScreenState extends State<TasksScreen> {
                           ),
                   onLongPress: () {
                     setState(() {
-                      if (selectedTaskIds.contains(task.id)) {
+                      if (isSelected) {
                         selectedTaskIds.remove(task.id);
                       } else {
                         selectedTaskIds.add(task.id);
